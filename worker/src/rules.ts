@@ -1,5 +1,8 @@
 export type Pip=0|1|2|3|4|5|6; export type Domino=`${Pip}-${Pip}`; export type Trump=Pip|"doubles"|"follow-me";
 export const ends=(d:Domino)=>d.split("-").map(Number) as [Pip,Pip]; export const isDouble=(d:Domino)=>{const[a,b]=ends(d);return a===b};
+export function fullSet():Domino[]{const out:Domino[]=[];for(let a=0;a<=6;a++)for(let b=0;b<=a;b++)out.push(`${a}-${b}` as Domino);return out}
+export function countValue(d:Domino){const[a,b]=ends(d);const total:number=a+b;return total===5||total===10?total:0}
+export function texas42Contract(bid:number,biddingTeamPoints:number){const made=bid<=42?biddingTeamPoints>=bid:biddingTeamPoints===42;return{made,marks:bid<=42?1:bid/42}}
 export function setForMoon(includeWidow=true):Domino[]{const out:Domino[]=[];for(let a=0;a<=6;a++)for(let b=0;b<=a;b++){if((a===0||b===0)&&!(a===0&&b===0))continue;out.push(`${a}-${b}` as Domino)}if(!includeWidow)return out.filter(d=>d!=="0-0");return out}
 export function suitMembership(d:Domino,trump:Trump):Pip[]{const[a,b]=ends(d);if(typeof trump==="number"&&(a===trump||b===trump))return [trump];if(trump==="doubles"&&a===b)return [];return a===b?[a]:[a,b]}
 export function isTrump(d:Domino,trump:Trump){const[a,b]=ends(d);return typeof trump==="number"?(a===trump||b===trump):trump==="doubles"&&a===b}
