@@ -7,3 +7,5 @@ Texas 42 includes all 28 dominoes, across-the-table teams, 30–42 point bids an
 ## Development
 
 Run `npm install`, then `npm run build` and `npm test`. Use `npx wrangler dev` for the full Worker and asset server.
+
+The Worker test suite uses Cloudflare's local Durable Object runtime to complete full mixed human/AI hands in both Moon and Texas 42. Use `npx wrangler dev --config wrangler.local.jsonc` when testing locally without production routes.
