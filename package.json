@@ -1,0 +1,1 @@
+{"name":"vab-dominoes-texas42","version":"1.0.0","private":true,"scripts":{"build":"npm install --prefix app && npm run build --prefix app && npm install --prefix worker","test":"npm test --prefix app && npm test --prefix worker","check":"npm run build && npm run typecheck --prefix worker"},"devDependencies":{"wrangler":"latest"}}
