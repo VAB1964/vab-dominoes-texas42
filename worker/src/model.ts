@@ -1,8 +1,8 @@
 import type {Domino,Pip,Trump} from "./rules";
-export type Difficulty="easy"|"medium"|"hard"; export type Phase="lobby"|"bidding"|"widow"|"trump"|"playing"|"hand-end"|"complete";
+export type GameType="moon"|"texas42"; export type Difficulty="easy"|"medium"|"hard"; export type Phase="lobby"|"bidding"|"widow"|"trump"|"playing"|"hand-end"|"complete";
 export interface Rules{minimumBid:3|4|5;allPass:"redeal"|"force-dealer";declareTrumpBeforeWidow:boolean;widow:"exchange"|"optional"|"none";moonScoring:"points"|"instant";allowDoublesTrump:boolean;allowFollowMe:boolean;overcallMoon:boolean;targetScore:number}
 export const DEFAULT_RULES:Rules={minimumBid:4,allPass:"redeal",declareTrumpBeforeWidow:false,widow:"exchange",moonScoring:"points",allowDoublesTrump:true,allowFollowMe:true,overcallMoon:false,targetScore:21};
-export interface Player{id:string;name:string;seat:number;score:number;connected:boolean;ready:boolean;isAI:boolean;difficulty:Difficulty|null;reconnectToken:string|null;tricks:number}
-export interface Game{phase:Phase;dealerSeat:number;turnSeat:number|null;bidderSeat:number|null;highBid:number|null;passed:number[];trump:Trump|null;ledSuit:Pip|null;trick:{seat:number;domino:Domino}[];hands:Record<number,Domino[]>;widow:Domino[];discard:Domino|null;handNumber:number;message:string;winnerSeat:number|null;}
-export interface State{roomId:string;revision:number;hostPlayerId:string;players:Player[];rules:Rules;game:Game;createdAt:number}
-export const emptyGame=():Game=>({phase:"lobby",dealerSeat:0,turnSeat:null,bidderSeat:null,highBid:null,passed:[],trump:null,ledSuit:null,trick:[],hands:{},widow:[],discard:null,handNumber:0,message:"Waiting for players.",winnerSeat:null});
+export interface Player{id:string;name:string;seat:number;score:number;connected:boolean;ready:boolean;isAI:boolean;difficulty:Difficulty|null;reconnectToken:string|null;tricks:number;handPoints:number}
+export interface Game{phase:Phase;dealerSeat:number;turnSeat:number|null;bidderSeat:number|null;highBid:number|null;passed:number[];trump:Trump|null;ledSuit:Pip|null;trick:{seat:number;domino:Domino}[];hands:Record<number,Domino[]>;widow:Domino[];discard:Domino|null;handNumber:number;message:string;winnerSeat:number|null;teamMarks:[number,number];teamHandPoints:[number,number];winnerTeam:number|null;}
+export interface State{roomId:string;revision:number;hostPlayerId:string;gameType:GameType;players:Player[];rules:Rules;game:Game;createdAt:number}
+export const emptyGame=():Game=>({phase:"lobby",dealerSeat:0,turnSeat:null,bidderSeat:null,highBid:null,passed:[],trump:null,ledSuit:null,trick:[],hands:{},widow:[],discard:null,handNumber:0,message:"Waiting for players.",winnerSeat:null,teamMarks:[0,0],teamHandPoints:[0,0],winnerTeam:null});
