@@ -1,6 +1,8 @@
 # VAB Moon & Texas 42
 
-Responsive multiplayer Moon dominoes for VABGames.com. Private invite-link rooms support human players, AI seat filling, reconnection, and configurable Moon house rules. The rules engine and room state are server-authoritative.
+Responsive multiplayer Moon and Texas 42 dominoes for VABGames.com. Private invite-link rooms support human players, AI seat filling, reconnection, configurable Moon house rules, and standard four-player partnership Texas 42. The rules engine and room state are server-authoritative.
+
+Texas 42 includes all 28 dominoes, across-the-table teams, 30–42 point bids and multi-mark bids, numbered/doubles/follow-me trump choices, the five count dominoes worth 35 total points, seven trick points, forced dealer bidding after three passes, and first team to seven marks.
 
 ## Development
 
