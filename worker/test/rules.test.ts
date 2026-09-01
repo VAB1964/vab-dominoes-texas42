@@ -1,0 +1,2 @@
+import {describe,it,expect} from "vitest";import {setForMoon,legalPlays,trickWinner} from "../src/rules";
+describe("rules",()=>{it("builds 22 domino set",()=>expect(setForMoon()).toHaveLength(22));it("builds no-widow set",()=>expect(setForMoon(false)).toHaveLength(21));it("forces trump",()=>expect(legalPlays(["5-3","3-2"],"5-1",5)).toEqual(["5-3"]));it("ranks double high in numbered suit",()=>expect(trickWinner([{seat:0,domino:"2-1"},{seat:1,domino:"2-2"},{seat:2,domino:"2-5"}],"follow-me")).toBe(1));});
