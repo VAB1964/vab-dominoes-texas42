@@ -1,0 +1,2 @@
+import {describe,it,expect} from "vitest"; import {legalPlays,trickWinner} from "../../worker/src/rules";
+describe("Moon rules",()=>{it("makes a numbered trump exclusive",()=>expect(legalPlays(["5-3","3-2","6-6"],"3-1",5)).toEqual(["3-2"]));it("requires the led suit",()=>expect(legalPlays(["5-3","3-2","6-6"],"5-1","follow-me")).toEqual(["5-3"]));it("lets trump win",()=>expect(trickWinner([{seat:0,domino:"6-4"},{seat:1,domino:"4-4"},{seat:2,domino:"6-6"}],4)).toBe(1));});
