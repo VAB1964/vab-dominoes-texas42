@@ -1,1 +1,1 @@
-{"name":"moon-room","version":"1.0.0","private":true,"type":"module","scripts":{"test":"vitest run","typecheck":"tsc --noEmit"},"dependencies":{"zod":"^4.0.0"},"devDependencies":{"@cloudflare/workers-types":"latest","typescript":"latest","vitest":"latest","wrangler":"latest"}}
+{"name":"moon-room","version":"1.0.0","private":true,"type":"module","scripts":{"test":"vitest run","typecheck":"tsc --noEmit"},"devDependencies":{"@cloudflare/vitest-plugin":"^1.0.0","@cloudflare/workers-types":"latest","typescript":"latest","vitest":"latest","wrangler":"latest"}}
