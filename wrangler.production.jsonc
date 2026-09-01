@@ -1,0 +1,18 @@
+{
+  "$schema":"./node_modules/wrangler/config-schema.json",
+  "name":"vab-dominoes-texas42",
+  "main":"worker/src/index.ts",
+  "compatibility_date":"2026-09-01",
+  "compatibility_flags":["nodejs_compat"],
+  "workers_dev":true,
+  "routes":[
+    {"pattern":"vabgames.com/dominoes/*","zone_name":"vabgames.com"},
+    {"pattern":"vabgames.com/api/dominoes/*","zone_name":"vabgames.com"},
+    {"pattern":"www.vabgames.com/dominoes/*","zone_name":"vabgames.com"},
+    {"pattern":"www.vabgames.com/api/dominoes/*","zone_name":"vabgames.com"}
+  ],
+  "assets":{"directory":"deploy","binding":"ASSETS","run_worker_first":["/api/dominoes/*","/dominoes/room/*"]},
+  "durable_objects":{"bindings":[{"name":"GAME_ROOMS","class_name":"GameRoom"}]},
+  "migrations":[{"tag":"v1","new_sqlite_classes":["GameRoom"]}],
+  "observability":{"enabled":true,"head_sampling_rate":1}
+}
