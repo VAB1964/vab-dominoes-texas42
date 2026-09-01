@@ -1,0 +1,4 @@
+import type {Domino as DominoValue} from "./types";
+const spots:Record<number,string[]>={0:[],1:["c"],2:["tl","br"],3:["tl","c","br"],4:["tl","tr","bl","br"],5:["tl","tr","c","bl","br"],6:["tl","tr","ml","mr","bl","br"]};
+function Half({value}:{value:number}){return <span className="pip-half">{spots[value].map(pos=><i key={pos} className={`pip ${pos}`}/>)}</span>}
+export function Domino({value,legal=false,onClick,hidden=false}:{value?:DominoValue;legal?:boolean;onClick?:()=>void;hidden?:boolean}){if(hidden||!value)return <span className="domino-back"/>;const [a,b]=value.split("-").map(Number);return <button type="button" className={`domino ${legal?"legal":""}`} onClick={onClick} disabled={!onClick} aria-label={`Domino ${a}-${b}`}><Half value={a}/><i className="domino-divider"/><Half value={b}/></button>}
