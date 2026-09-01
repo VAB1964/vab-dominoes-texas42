@@ -16,6 +16,17 @@ const defaults: Rules = {
   overcallMoon: false,
   targetScore: 21,
 };
+const TRICK_CLEAR_DELAY_MS = 2200;
+type DisplayedTrickPlay = RoomView["game"]["trick"][number] & { id: number };
+async function safeJson<T>(response: Response): Promise<T | null> {
+  const text = await response.text();
+  if (!text.trim()) return null;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
 export default function App() {
   const invite = useMemo(codeFromUrl, []);
   const [screen, setScreen] = useState<"home" | "room" | "game">(
@@ -52,8 +63,13 @@ export default function App() {
     setError("");
     try {
       const r = await fetch("/api/dominoes/rooms", { method: "POST" });
-      const b = (await r.json()) as { roomId?: string };
-      if (!r.ok || !b.roomId) throw new Error("Room service unavailable.");
+      const b = await safeJson<{ roomId?: string; error?: { message?: string } }>(
+        r,
+      );
+      if (!r.ok) {
+        throw new Error(b?.error?.message || "Room service unavailable.");
+      }
+      if (!b?.roomId) throw new Error("Room service unavailable.");
       enter(b.roomId, true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to create room.");
@@ -371,9 +387,61 @@ function Game({
   const g = view.game;
   const me = view.players.find((p) => p.id === playerId);
   const count = view.gameType === "texas42" ? 4 : 3;
+  const [displayedTrick, setDisplayedTrick] = useState<DisplayedTrickPlay[]>([]);
+  const trickPlayId = useRef(0);
+  const trickClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hiddenCompletedTrickSignature = useRef<string | null>(null);
   const bySeat = (s: number) => view.players.find((p) => p.seat === s);
   const relative = (offset: number) =>
     bySeat(((me?.seat || 0) + offset) % count);
+  const trickOriginClass = (seat: number) => {
+    const relativeSeat = (seat - (me?.seat || 0) + count) % count;
+    if (relativeSeat === 0) return "from-south";
+    if (relativeSeat === 1) return "from-west";
+    if (relativeSeat === 2) return "from-north";
+    return "from-east";
+  };
+
+  useEffect(
+    () => () => {
+      if (trickClearTimer.current) clearTimeout(trickClearTimer.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (trickClearTimer.current) {
+      clearTimeout(trickClearTimer.current);
+      trickClearTimer.current = null;
+    }
+
+    const signature = g.trick.map((play) => `${play.seat}:${play.domino}`).join("|");
+    if (g.trick.length === count && hiddenCompletedTrickSignature.current === signature) {
+      if (displayedTrick.length) setDisplayedTrick([]);
+      return;
+    }
+
+    if (g.trick.length < count) hiddenCompletedTrickSignature.current = null;
+
+    setDisplayedTrick((prev) =>
+      g.trick.map((play, index) => {
+        const existing = prev[index];
+        if (existing && existing.seat === play.seat && existing.domino === play.domino)
+          return existing;
+        trickPlayId.current += 1;
+        return { ...play, id: trickPlayId.current };
+      }),
+    );
+
+    if (g.trick.length === count) {
+      trickClearTimer.current = setTimeout(() => {
+        hiddenCompletedTrickSignature.current = signature;
+        setDisplayedTrick([]);
+        trickClearTimer.current = null;
+      }, TRICK_CLEAR_DELAY_MS);
+    }
+  }, [count, displayedTrick.length, g.trick]);
+
   const bidLabel = g.highBid
     ? (view.gameType === "texas42" && g.highBid > 42
         ? `${g.highBid / 42} marks`
@@ -440,8 +508,13 @@ function Game({
           <HiddenHand count={relative(3)?.dominoCount || 0} pos="east" />
         )}
         <div className="trick">
-          {g.trick.map((play) => (
-            <Domino key={`${play.seat}-${play.domino}`} value={play.domino} />
+          {displayedTrick.map((play) => (
+            <div
+              key={play.id}
+              className={`trick-play ${trickOriginClass(play.seat)}`}
+            >
+              <Domino value={play.domino} />
+            </div>
           ))}
         </div>
         {g.widowCount > 0 && (
