@@ -31,12 +31,11 @@ async function safeJson<T>(response: Response): Promise<T | null> {
 }
 export default function App() {
   const invite = useMemo(codeFromUrl, []);
+  const inviteOnlyEntry = Boolean(invite);
   const [screen, setScreen] = useState<"home" | "room" | "game">(
     invite ? "room" : "home",
   );
-  const [name, setName] = useState(
-    localStorage.getItem("moon.name") || "Vince",
-  );
+  const [name, setName] = useState(localStorage.getItem("moon.name") || "");
   const [gameType, setGameType] = useState<GameType>("moon");
   const [code, setCode] = useState(invite);
   const [joinCode, setJoinCode] = useState(invite);
@@ -157,50 +156,57 @@ export default function App() {
         <span className="eyebrow">VAB Games presents</span>
         <h1>Domino Card Room</h1>
         <p>
-          Choose three-player Moon or four-player partnership Texas 42. Invite
-          friends or fill open chairs with AI players.
+          {inviteOnlyEntry
+            ? "Enter your name and room code to continue."
+            : "Choose three-player Moon or four-player partnership Texas 42. Invite friends or fill open chairs with AI players."}
         </p>
         {error && (
           <p className="error" role="alert">
             {error}
           </p>
         )}
-        <div className="game-picks">
-          <button
-            className={gameType === "moon" ? "selected" : ""}
-            onClick={() => setGameType("moon")}
-          >
-            <strong>Moon</strong>
-            <span>3 players · individual scoring · widow</span>
-          </button>
-          <button
-            className={gameType === "texas42" ? "selected" : ""}
-            onClick={() => setGameType("texas42")}
-          >
-            <strong>Texas 42</strong>
-            <span>4 players · partners · count dominoes</span>
-          </button>
-        </div>
+        {!inviteOnlyEntry && (
+          <div className="game-picks">
+            <button
+              className={gameType === "moon" ? "selected" : ""}
+              onClick={() => setGameType("moon")}
+            >
+              <strong>Moon</strong>
+              <span>3 players · individual scoring · widow</span>
+            </button>
+            <button
+              className={gameType === "texas42" ? "selected" : ""}
+              onClick={() => setGameType("texas42")}
+            >
+              <strong>Texas 42</strong>
+              <span>4 players · partners · count dominoes</span>
+            </button>
+          </div>
+        )}
         <label>
-          Your name
+          {inviteOnlyEntry ? "Name" : "Your name"}
           <input
             maxLength={24}
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
         </label>
-        <button
-          className="primary"
-          disabled={!name.trim() || creating}
-          onClick={() => void create()}
-        >
-          {creating
-            ? "Creating…"
-            : `Create ${gameType === "moon" ? "Moon" : "Texas 42"} game`}
-        </button>
-        <div className="or">or</div>
+        {!inviteOnlyEntry && (
+          <>
+            <button
+              className="primary"
+              disabled={!name.trim() || creating}
+              onClick={() => void create()}
+            >
+              {creating
+                ? "Creating…"
+                : `Create ${gameType === "moon" ? "Moon" : "Texas 42"} game`}
+            </button>
+            <div className="or">or</div>
+          </>
+        )}
         <label>
-          Room code
+          {inviteOnlyEntry ? "Code" : "Room code"}
           <input
             value={joinCode}
             onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
@@ -211,9 +217,9 @@ export default function App() {
           disabled={!name.trim() || !/[A-HJ-NP-Z2-9]{6}/.test(joinCode)}
           onClick={() => enter(joinCode, false)}
         >
-          Join game
+          {inviteOnlyEntry ? "Continue" : "Join game"}
         </button>
-        <a href="https://vabgames.com">Back to VABGames.com</a>
+        {!inviteOnlyEntry && <a href="https://vabgames.com">Back to VABGames.com</a>}
       </section>
     </main>
   );
