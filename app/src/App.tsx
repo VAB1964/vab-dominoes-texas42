@@ -17,6 +17,8 @@ const defaults: Rules = {
   targetScore: 21,
 };
 const TRICK_CLEAR_DELAY_MS = 2200;
+const TRICK_CLEAR_DELAY_AI_LAST_MS = 3200;
+const BUTTON_CLICK_VOLUME = 0.03;
 type DisplayedTrickPlay = RoomView["game"]["trick"][number] & { id: number };
 async function safeJson<T>(response: Response): Promise<T | null> {
   const text = await response.text();
@@ -42,6 +44,51 @@ export default function App() {
   const [view, setView] = useState<RoomView | null>(null);
   const [error, setError] = useState("");
   const client = useRef<RoomClient | null>(null);
+  const clickAudioContext = useRef<AudioContext | null>(null);
+
+  useEffect(() => {
+    const playClick = () => {
+      if (typeof window === "undefined" || !("AudioContext" in window)) return;
+      try {
+        const Ctx = window.AudioContext;
+        const ctx = clickAudioContext.current || new Ctx();
+        clickAudioContext.current = ctx;
+        if (ctx.state === "suspended") void ctx.resume();
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+        oscillator.type = "triangle";
+        oscillator.frequency.setValueAtTime(720, ctx.currentTime);
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(
+          BUTTON_CLICK_VOLUME,
+          ctx.currentTime + 0.006,
+        );
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.055);
+        oscillator.connect(gain);
+        gain.connect(ctx.destination);
+        oscillator.start();
+        oscillator.stop(ctx.currentTime + 0.06);
+      } catch {
+        // Ignore audio playback errors so button behavior is never blocked.
+      }
+    };
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const button = target.closest("button");
+      if (!button || (button as HTMLButtonElement).disabled) return;
+      playClick();
+    };
+
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      const ctx = clickAudioContext.current;
+      clickAudioContext.current = null;
+      if (ctx) void ctx.close();
+    };
+  }, []);
   const enter = (room: string, create: boolean, type: GameType = gameType) => {
     localStorage.setItem("moon.name", name.trim());
     setCode(room);
@@ -388,6 +435,8 @@ function Game({
   const me = view.players.find((p) => p.id === playerId);
   const count = view.gameType === "texas42" ? 4 : 3;
   const [displayedTrick, setDisplayedTrick] = useState<DisplayedTrickPlay[]>([]);
+  const [collectingTrick, setCollectingTrick] = useState(false);
+  const [trickWinnerSeat, setTrickWinnerSeat] = useState<number | null>(null);
   const trickPlayId = useRef(0);
   const trickClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hiddenCompletedTrickSignature = useRef<string | null>(null);
@@ -400,6 +449,14 @@ function Game({
     if (relativeSeat === 1) return "from-west";
     if (relativeSeat === 2) return "from-north";
     return "from-east";
+  };
+  const trickCollectClass = (seat: number | null) => {
+    if (seat === null) return "";
+    const relativeSeat = (seat - (me?.seat || 0) + count) % count;
+    if (relativeSeat === 0) return "to-south";
+    if (relativeSeat === 1) return "to-west";
+    if (relativeSeat === 2) return "to-north";
+    return "to-east";
   };
 
   useEffect(
@@ -417,11 +474,19 @@ function Game({
 
     const signature = g.trick.map((play) => `${play.seat}:${play.domino}`).join("|");
     if (g.trick.length === count && hiddenCompletedTrickSignature.current === signature) {
-      if (displayedTrick.length) setDisplayedTrick([]);
+      if (displayedTrick.length) {
+        setDisplayedTrick([]);
+        setCollectingTrick(false);
+        setTrickWinnerSeat(null);
+      }
       return;
     }
 
-    if (g.trick.length < count) hiddenCompletedTrickSignature.current = null;
+    if (g.trick.length < count) {
+      hiddenCompletedTrickSignature.current = null;
+      if (collectingTrick) setCollectingTrick(false);
+      if (trickWinnerSeat !== null) setTrickWinnerSeat(null);
+    }
 
     setDisplayedTrick((prev) =>
       g.trick.map((play, index) => {
@@ -434,13 +499,22 @@ function Game({
     );
 
     if (g.trick.length === count) {
+      const lastPlay = g.trick[g.trick.length - 1];
+      const clearDelay =
+        lastPlay && bySeat(lastPlay.seat)?.isAI
+          ? TRICK_CLEAR_DELAY_AI_LAST_MS
+          : TRICK_CLEAR_DELAY_MS;
+      setTrickWinnerSeat(g.turnSeat);
+      setCollectingTrick(true);
       trickClearTimer.current = setTimeout(() => {
         hiddenCompletedTrickSignature.current = signature;
         setDisplayedTrick([]);
+        setCollectingTrick(false);
+        setTrickWinnerSeat(null);
         trickClearTimer.current = null;
-      }, TRICK_CLEAR_DELAY_MS);
+      }, clearDelay);
     }
-  }, [count, displayedTrick.length, g.trick]);
+  }, [collectingTrick, count, displayedTrick.length, g.trick, g.turnSeat, trickWinnerSeat]);
 
   const bidLabel = g.highBid
     ? (view.gameType === "texas42" && g.highBid > 42
@@ -507,7 +581,9 @@ function Game({
         {view.gameType === "texas42" && (
           <HiddenHand count={relative(3)?.dominoCount || 0} pos="east" />
         )}
-        <div className="trick">
+        <div
+          className={`trick ${collectingTrick ? `collecting ${trickCollectClass(trickWinnerSeat)}` : ""}`}
+        >
           {displayedTrick.map((play) => (
             <div
               key={play.id}
@@ -554,7 +630,50 @@ function Game({
           ))}
         </div>
       </section>
-      <Decision g={g} rules={view.rules} gameType={view.gameType} send={send} />
+      <Decision
+        g={g}
+        rules={view.rules}
+        gameType={view.gameType}
+        meSeat={me?.seat ?? null}
+        turnName={g.turnSeat === null ? null : bySeat(g.turnSeat)?.name ?? null}
+        bidderName={g.bidderSeat === null ? null : bySeat(g.bidderSeat)?.name ?? null}
+        send={send}
+      />
+      {g.phase === "complete" && (
+        <div className="game-modal-backdrop" role="presentation">
+          <section
+            className="game-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="game-over-title"
+          >
+            <h2 id="game-over-title">Game over</h2>
+            <p>{g.message}</p>
+            {view.gameType === "texas42" ? (
+              <p className="game-over-detail">
+                Final marks: Team 1 {g.teamMarks[0]} - Team 2 {g.teamMarks[1]}
+              </p>
+            ) : (
+              <div className="game-over-scores">
+                {view.players
+                  .slice()
+                  .sort((a, b) => b.score - a.score)
+                  .map((player) => (
+                    <span key={player.id}>
+                      {player.name}: {player.score}
+                    </span>
+                  ))}
+              </div>
+            )}
+            <div className="game-modal-actions">
+              <button className="primary" onClick={() => send("REMATCH")}>
+                Rematch
+              </button>
+              <button onClick={leave}>Quit</button>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
@@ -594,14 +713,26 @@ function Decision({
   g,
   rules,
   gameType,
+  meSeat,
+  turnName,
+  bidderName,
   send,
 }: {
   g: RoomView["game"];
   rules: Rules;
   gameType: GameType;
+  meSeat: number | null;
+  turnName: string | null;
+  bidderName: string | null;
   send: (t: string, p?: unknown) => void;
 }) {
   if (g.phase === "bidding") {
+    if (g.turnSeat !== meSeat)
+      return (
+        <section className="decision">
+          <strong>{turnName || "Another player"} is bidding</strong>
+        </section>
+      );
     if (gameType === "texas42") {
       const start = Math.max(30, (g.highBid || 29) + 1),
         pointBids = Array.from(
@@ -665,6 +796,13 @@ function Decision({
     );
   }
   if (g.phase === "trump")
+    if (g.bidderSeat !== meSeat)
+      return (
+        <section className="decision">
+          <strong>{bidderName || "The winning bidder"} is choosing trump</strong>
+        </section>
+      );
+  if (g.phase === "trump")
     return (
       <section className="decision">
         <strong>Choose trump</strong>
@@ -696,6 +834,13 @@ function Decision({
       </section>
     );
   if (g.phase === "widow")
+    if (g.bidderSeat !== meSeat)
+      return (
+        <section className="decision">
+          <strong>{bidderName || "The winning bidder"} is handling the widow</strong>
+        </section>
+      );
+  if (g.phase === "widow")
     return (
       <section className="decision">
         <strong>Pick up the widow, then discard one domino</strong>
@@ -723,13 +868,6 @@ function Decision({
       </section>
     );
   if (g.phase === "complete")
-    return (
-      <section className="decision">
-        <strong>{g.message}</strong>
-        <button className="primary" onClick={() => send("REMATCH")}>
-          Play again
-        </button>
-      </section>
-    );
+    return null;
   return null;
 }

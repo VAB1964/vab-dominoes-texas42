@@ -1,6 +1,6 @@
 import {DurableObject} from "cloudflare:workers";import {DEFAULT_RULES,emptyGame,type Difficulty,type Player,type Rules,type State} from "./model";import {countValue,ends,fullSet,isDouble,legalPlays,ledSuit,setForMoon,shuffle,texas42Contract,trickWinner,type Domino,type Pip,type Trump} from "./rules";
 type Env={}; type Client={playerId:string|null};
-const AI_PLAY_DELAY_MS=300;
+const AI_PLAY_DELAY_MS=700;
 export class GameRoom extends DurableObject<Env>{stateData:State|null=null; sockets=new Map<WebSocket,Client>();
  async executeForTest(c:{type:string;payload?:any;playerId?:string|null;expectedRevision?:number}){const messages:string[]=[];let attachment:Client|undefined;const ws={send:(value:string)=>messages.push(value),serializeAttachment:(value:Client)=>{attachment=value},deserializeAttachment:()=>attachment} as unknown as WebSocket;try{await this.command(ws,c);await this.advanceAI();await this.save();const response=messages.length?JSON.parse(messages.at(-1)!):{};return{ok:true,...response,view:this.view(c.playerId??response.playerId??null)}}catch(error){return{ok:false,error:{message:error instanceof Error?error.message:"Invalid action."},view:this.view(c.playerId??null)}}}
  async viewForTest(playerId:string|null){if(!this.stateData)this.stateData=await this.ctx.storage.get<State>("state")??null;return this.stateData?this.view(playerId):null}
