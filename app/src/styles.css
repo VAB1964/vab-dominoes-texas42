@@ -4,7 +4,7 @@
 .game-picks{display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin:1rem 0}.game-picks button{display:grid;gap:.25rem;text-align:left;padding:1rem}.game-picks button span{color:#d8c9aa}.game-picks button.selected{border-color:#f3b84b;box-shadow:0 0 0 3px #f3b84b35;background:#ffffff18}.team-note{color:#d8c9aa}.seats article.team-0{border-left:4px solid #f3b84b}.seats article.team-1{border-left:4px solid #6cb8e8}.hidden-hand.east{right:55px;top:58%;transform:rotate(-90deg)}
 @media(max-width:700px){.game-picks{grid-template-columns:1fr}.hidden-hand.east{right:34px;top:39%}.table.texas42 .trick{transform:translate(-50%,-50%) scale(.76)}.table.texas42 .player{min-width:116px}.table.texas42 .player small{font-size:.7rem}}
 .game-error{width:min(760px,calc(100% - 1rem));margin:.5rem auto;padding:.65rem .8rem;border:1px solid #f3b84b;border-radius:.7rem;text-align:center;color:#fff7e8;background:#6f2a2ae8}
-.trick-play{--from-x:0px;--from-y:0px;display:flex;opacity:1;transform:translate(0,0) scale(1);transition:transform .45s ease-in,opacity .45s ease-in;animation:trick-slide-in .3s ease-out both}.trick-play.from-south{--from-y:120px}.trick-play.from-west{--from-x:-145px}.trick-play.from-north{--from-y:-120px}.trick-play.from-east{--from-x:145px}@keyframes trick-slide-in{from{opacity:.12;transform:translate(var(--from-x),var(--from-y)) scale(.92)}to{opacity:1;transform:translate(0,0) scale(1)}}
+.trick-play{--from-x:0px;--from-y:0px;display:flex;opacity:1;transform:translate(0,0) scale(1);transition:transform .45s ease-in,opacity .3s ease-in;animation:trick-slide-in .3s ease-out both}.trick-play.from-south{--from-y:120px}.trick-play.from-west{--from-x:-145px}.trick-play.from-north{--from-y:-120px}.trick-play.from-east{--from-x:145px}@keyframes trick-slide-in{from{opacity:.12;transform:translate(var(--from-x),var(--from-y)) scale(.92)}to{opacity:1;transform:translate(0,0) scale(1)}}
 .trick.collecting .trick-play{opacity:.15}
 .trick.collecting.to-south .trick-play{transform:translate(0,130px) scale(.8)}
 .trick.collecting.to-west .trick-play{transform:translate(-165px,0) scale(.8)}
@@ -16,3 +16,42 @@
 .game-over-detail{margin:.45rem 0;color:#ffe0a0}
 .game-over-scores{display:grid;gap:.2rem;margin:.55rem 0;color:#d8c9aa}
 .game-modal-actions{display:flex;justify-content:center;gap:.55rem;margin-top:.8rem;flex-wrap:wrap}
+.player.active{border-color:#ffd675;box-shadow:0 0 0 3px #ffd6755e,0 0 22px #f3b84b66;animation:player-turn-pulse 1.1s ease-in-out infinite}
+.turn-indicator{margin-top:.16rem;font-weight:700;letter-spacing:.04em;color:#ffe9b8;text-transform:uppercase}
+.hidden-hand.active .domino-back{border-color:#ffd675;box-shadow:0 0 0 2px #f3b84b66}
+.active-hand{padding:.42rem .5rem .75rem;border:1px solid #f3b84b75;border-radius:.9rem;background:#f3b84b12;box-shadow:0 0 0 2px #f3b84b24}
+.opening-draw{position:absolute;top:96px;left:50%;transform:translateX(-50%);z-index:4;width:min(760px,90%);padding:.6rem .7rem;border:1px solid #ffd67587;border-radius:.9rem;text-align:center;color:#ffe9b8;background:#090b16de;box-shadow:0 10px 24px #0008}
+.opening-draw strong{display:block;letter-spacing:.08em;text-transform:uppercase}
+.opening-draw-list{display:flex;justify-content:center;gap:.6rem;margin:.4rem 0 .25rem;flex-wrap:wrap}
+.opening-draw-list article{display:grid;justify-items:center;gap:.25rem;padding:.38rem .45rem;border:1px solid #ffffff22;border-radius:.72rem;min-width:88px;background:#ffffff0a}
+.opening-draw-list article.leader{border-color:#ffd675;box-shadow:0 0 0 2px #f3b84b40}
+.opening-draw-list article span{font-size:.82rem;color:#d8c9aa}
+.opening-draw p{margin:.2rem 0 0}
+.trick{padding:.65rem .9rem;border:2px solid transparent;border-radius:1rem;transition:border-color .2s ease,box-shadow .2s ease,background .2s ease}
+.trick.winner-spotlight{border-color:#ffd675;background:#ffdf8c1a;box-shadow:0 0 0 2px #f3b84b35}
+.trick-play.winner{animation:winner-domino-pop .95s ease-in-out infinite alternate}
+.trick-play.no-entry{animation:none}
+.trick-winner-banner{position:absolute;left:50%;top:calc(50% + 98px);transform:translateX(-50%);z-index:6;padding:.55rem .92rem;border:1px solid #ffd675ad;border-radius:999px;font-size:1.08rem;letter-spacing:.02em;color:#fff6db;background:#090b16f2;box-shadow:0 8px 22px #0008}
+.trick-winner-banner strong{color:#ffd675}
+.game-modal{width:min(560px,100%);padding:1.2rem 1rem;border:2px solid #f3b84b;border-radius:.95rem;text-align:center;background:linear-gradient(155deg,#20284b,#171b2f);box-shadow:0 20px 45px #0009}
+.hand-result-modal,.game-over-modal{background:linear-gradient(155deg,#2d1f4f,#171b2f);border-color:#ffd675}
+.result-grid{display:grid;gap:.35rem;margin:.7rem 0;color:#d8c9aa}
+.result-grid b{color:#fff7e8}
+.table-center-overlay{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7;width:min(560px,92%);padding:1rem .95rem;border:2px solid #ffd675;border-radius:1rem;text-align:center;background:linear-gradient(155deg,#2d1f4f,#171b2f);box-shadow:0 20px 45px #0009}
+.table-center-overlay h2{margin:.1rem 0 .55rem}
+.table-center-overlay p{margin:.25rem 0 .5rem}
+.pip{box-shadow:0 0 0 1.2px #111}
+.pip-half.pip-value-1 .pip{background:#ff4e4e}
+.pip-half.pip-value-2 .pip{background:#4ea2ff}
+.pip-half.pip-value-3 .pip{background:#4dd26b}
+.pip-half.pip-value-4 .pip{background:#ae6bff}
+.pip-half.pip-value-5 .pip{background:#ff6ec7}
+.pip-half.pip-value-6 .pip{background:#ff9a3d}
+@keyframes player-turn-pulse{0%{box-shadow:0 0 0 2px #ffd67544,0 0 12px #f3b84b3a}50%{box-shadow:0 0 0 4px #ffd67577,0 0 26px #f3b84b8c}100%{box-shadow:0 0 0 2px #ffd67544,0 0 12px #f3b84b3a}}
+@keyframes winner-domino-pop{0%{transform:translateY(0) scale(1)}100%{transform:translateY(-8px) scale(1.08)}}
+@media(max-width:700px){.opening-draw{top:72px;width:min(620px,93%)}.opening-draw-list article{min-width:76px}.trick-winner-banner{top:calc(50% + 82px);font-size:.95rem;width:min(360px,88%)}.table-center-overlay{width:min(460px,93%);padding:.82rem .72rem}}
+.debug-log-panel{width:min(1040px,calc(100% - 1rem));margin:.55rem auto 0;padding:.6rem .7rem;border:1px solid #ffffff2b;border-radius:.8rem;background:#090b16dd}
+.debug-log-panel header{display:flex;justify-content:space-between;gap:.6rem;align-items:center;flex-wrap:wrap}
+.debug-log-panel header div{display:flex;gap:.4rem;flex-wrap:wrap}
+.debug-log-panel strong{color:#ffd675}
+.debug-log-panel pre{max-height:260px;overflow:auto;margin:.55rem 0 0;padding:.5rem .55rem;border-radius:.55rem;background:#05070f;color:#d6dfec;font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;white-space:pre-wrap}

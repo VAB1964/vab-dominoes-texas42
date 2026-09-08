@@ -1,7 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { RoomClient } from "./client";
 import { Domino } from "./domino";
-import type { Domino as D, GameType, RoomView, Rules, Trump } from "./types";
+import {
+  scheduleTrickTimeline,
+  TRICK_COLLECT_ANIMATION_MS,
+  TRICK_WINNER_DISPLAY_MS,
+} from "./trick-timeline";
+import type {
+  Domino as D,
+  EventEnvelope,
+  GameType,
+  PresentationSync,
+  RoomView,
+  Rules,
+  Trump,
+} from "./types";
 const codeFromUrl = () =>
   location.pathname.match(/\/room\/([A-HJ-NP-Z2-9]{6})/i)?.[1]?.toUpperCase() ||
   "";
@@ -16,10 +36,18 @@ const defaults: Rules = {
   overcallMoon: false,
   targetScore: 21,
 };
-const TRICK_CLEAR_DELAY_MS = 2200;
-const TRICK_CLEAR_DELAY_AI_LAST_MS = 3200;
+const OPENING_DRAW_DISPLAY_MS = 5000;
 const BUTTON_CLICK_VOLUME = 0.03;
-type DisplayedTrickPlay = RoomView["game"]["trick"][number] & { id: number };
+const MAX_DEBUG_LINES = 500;
+const DEFERRED_EVENT_STAGGER_MS = 100;
+const POST_CLEAR_PLAYBACK_DELAY_MS = 120;
+const DEFERRED_EVENT_INITIAL_DELAY_MS = 60;
+type DisplayedTrickPlay = RoomView["game"]["trick"][number] & {
+  id: string;
+  playId: number;
+  trickId: number;
+  noEntryAnimation?: boolean;
+};
 async function safeJson<T>(response: Response): Promise<T | null> {
   const text = await response.text();
   if (!text.trim()) return null;
@@ -41,6 +69,8 @@ export default function App() {
   const [joinCode, setJoinCode] = useState(invite);
   const [creating, setCreating] = useState(false);
   const [view, setView] = useState<RoomView | null>(null);
+  const [events, setEvents] = useState<EventEnvelope[]>([]);
+  const [presentationSync, setPresentationSync] = useState<PresentationSync | null>(null);
   const [error, setError] = useState("");
   const client = useRef<RoomClient | null>(null);
   const clickAudioContext = useRef<AudioContext | null>(null);
@@ -90,10 +120,21 @@ export default function App() {
   }, []);
   const enter = (room: string, create: boolean, type: GameType = gameType) => {
     localStorage.setItem("moon.name", name.trim());
+    setEvents([]);
+    setPresentationSync(null);
     setCode(room);
     setScreen("room");
-    const c = new RoomClient(room, (next, err) => {
+    const c = new RoomClient(room, (next, err, event, sync) => {
       if (err) setError(err);
+      if (sync) {
+        setEvents([]);
+        setPresentationSync(sync);
+      }
+      if (event) {
+        setEvents((prev) =>
+          prev.length > 300 ? [...prev.slice(prev.length - 150), event] : [...prev, event],
+        );
+      }
       if (next) {
         setError("");
         setView(next);
@@ -127,6 +168,8 @@ export default function App() {
     return (
       <Game
         view={view}
+        events={events}
+        presentationSync={presentationSync}
         playerId={client.current?.playerId || ""}
         error={error}
         send={(t, p) => client.current?.send(t, p)}
@@ -134,6 +177,8 @@ export default function App() {
           client.current?.close();
           setScreen("home");
           setView(null);
+          setEvents([]);
+          setPresentationSync(null);
         }}
       />
     );
@@ -147,6 +192,8 @@ export default function App() {
           client.current?.close();
           setScreen("home");
           setView(null);
+          setEvents([]);
+          setPresentationSync(null);
         }}
       />
     );
@@ -426,12 +473,16 @@ function Lobby({
 }
 function Game({
   view,
+  events,
+  presentationSync,
   playerId,
   error,
   send,
   leave,
 }: {
   view: RoomView;
+  events: EventEnvelope[];
+  presentationSync: PresentationSync | null;
   playerId: string;
   error: string;
   send: (t: string, p?: unknown) => void;
@@ -441,11 +492,50 @@ function Game({
   const me = view.players.find((p) => p.id === playerId);
   const count = view.gameType === "texas42" ? 4 : 3;
   const [displayedTrick, setDisplayedTrick] = useState<DisplayedTrickPlay[]>([]);
-  const [collectingTrick, setCollectingTrick] = useState(false);
+  const [trickPhase, setTrickPhase] = useState<
+    "cleared" | "building" | "winnerHold" | "collecting"
+  >("cleared");
+  const [showOpeningDraw, setShowOpeningDraw] = useState(false);
   const [trickWinnerSeat, setTrickWinnerSeat] = useState<number | null>(null);
-  const trickPlayId = useRef(0);
-  const trickClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hiddenCompletedTrickSignature = useRef<string | null>(null);
+  const [presentedTurnSeat, setPresentedTurnSeat] = useState<number | null>(g.turnSeat);
+  const [presentedMessage, setPresentedMessage] = useState(g.message);
+  const [presentedPhase, setPresentedPhase] = useState(g.phase);
+  const [presentedDominoCounts, setPresentedDominoCounts] = useState<Record<number, number>>(
+    () => Object.fromEntries(view.players.map((player) => [player.seat, player.dominoCount])),
+  );
+  const [debugLines, setDebugLines] = useState<string[]>([]);
+  const [debugOpen, setDebugOpen] = useState(true);
+  const openingDrawSeenSignature = useRef<string | null>(null);
+  const openingDrawTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const trickElement = useRef<HTMLDivElement | null>(null);
+  const clearTimeline = useRef<(() => void) | null>(null);
+  const queueDrainTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deferredPlaybackTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const deferredPlaybackPending = useRef(0);
+  const processedSeq = useRef(0);
+  const appliedPresentationSync = useRef<PresentationSync | null>(null);
+  const deferredEvents = useRef<EventEnvelope[]>([]);
+  const phaseRef = useRef(trickPhase);
+  const presentedTrickIdRef = useRef<number | null>(null);
+  const currentHandIdRef = useRef<number>(g.handId);
+  const sessionStartMs = useRef(Date.now());
+  const debugEnabled = useMemo(
+    () => new URLSearchParams(location.search).has("debugRender") || localStorage.getItem("moon.debugRender") === "1",
+    [],
+  );
+  const pushDebug = useCallback(
+    (label: string, details = "") => {
+      if (!debugEnabled) return;
+      const elapsedMs = Date.now() - sessionStartMs.current;
+      const elapsed = `${(elapsedMs / 1000).toFixed(3)}s`;
+      const line = `${elapsed} | ${label}${details ? ` | ${details}` : ""}`;
+      setDebugLines((prev) => {
+        const next = prev.length >= MAX_DEBUG_LINES ? [...prev.slice(prev.length - 250), line] : [...prev, line];
+        return next;
+      });
+    },
+    [debugEnabled],
+  );
   const bySeat = (s: number) => view.players.find((p) => p.seat === s);
   const relative = (offset: number) =>
     bySeat(((me?.seat || 0) + offset) % count);
@@ -465,68 +555,403 @@ function Game({
     return "to-east";
   };
 
+  useEffect(() => {
+    phaseRef.current = trickPhase;
+  }, [trickPhase]);
+
+  useLayoutEffect(() => {
+    if (!debugEnabled) return;
+    const describeDom = () =>
+      Array.from(trickElement.current?.querySelectorAll<HTMLElement>(".trick-play") ?? [])
+        .map(
+          (node) =>
+            `${node.dataset.trickId}:${node.dataset.playId}:${getComputedStyle(node).opacity}`,
+        )
+        .join(",");
+    pushDebug(
+      "DOM_COMMIT",
+      `phase=${trickPhase} state=[${displayedTrick.map((play) => `${play.trickId}:${play.playId}`).join(",")}] dom=[${describeDom()}]`,
+    );
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        pushDebug("DOM_PAINT", `phase=${phaseRef.current} dom=[${describeDom()}]`);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      if (secondFrame) cancelAnimationFrame(secondFrame);
+    };
+  }, [debugEnabled, displayedTrick, pushDebug, trickPhase]);
+
+  useEffect(() => {
+    pushDebug(
+      "AUTHORITATIVE_VIEW",
+      `hand=${g.handId} trick=${g.trickId} plays=${g.trick.length} phase=${g.phase} turn=${g.turnSeat} counts=[${view.players.map((player) => `${player.seat}:${player.dominoCount}`).join(",")}] message=${g.message}`,
+    );
+  }, [
+    g.handId,
+    g.message,
+    g.phase,
+    g.trick.length,
+    g.trickId,
+    g.turnSeat,
+    pushDebug,
+    view.players,
+  ]);
+
   useEffect(
     () => () => {
-      if (trickClearTimer.current) clearTimeout(trickClearTimer.current);
+      if (openingDrawTimer.current) clearTimeout(openingDrawTimer.current);
+      if (clearTimeline.current) clearTimeline.current();
+      if (queueDrainTimer.current) clearTimeout(queueDrainTimer.current);
+      for (const timer of deferredPlaybackTimers.current) clearTimeout(timer);
+      deferredPlaybackTimers.current = [];
+      deferredPlaybackPending.current = 0;
     },
     [],
   );
 
   useEffect(() => {
-    if (trickClearTimer.current) {
-      clearTimeout(trickClearTimer.current);
-      trickClearTimer.current = null;
-    }
+    if (!g.openingDrawActive || g.openingDraw.length === 0) return;
+    const drawSignature = `${g.handNumber}:${g.openingDraw
+      .map((draw) => `${draw.seat}:${draw.domino}`)
+      .join("|")}`;
+    if (openingDrawSeenSignature.current === drawSignature) return;
+    openingDrawSeenSignature.current = drawSignature;
+    pushDebug("OPENING_DRAW_SHOW", drawSignature);
+    setShowOpeningDraw(true);
+    if (openingDrawTimer.current) clearTimeout(openingDrawTimer.current);
+    openingDrawTimer.current = setTimeout(() => {
+      setShowOpeningDraw(false);
+      pushDebug("OPENING_DRAW_HIDE");
+      openingDrawTimer.current = null;
+    }, OPENING_DRAW_DISPLAY_MS);
+  }, [g.handNumber, g.openingDraw, g.openingDrawActive, pushDebug]);
 
-    const signature = g.trick.map((play) => `${play.seat}:${play.domino}`).join("|");
-    if (g.trick.length === count && hiddenCompletedTrickSignature.current === signature) {
-      if (displayedTrick.length) {
-        setDisplayedTrick([]);
-        setCollectingTrick(false);
-        setTrickWinnerSeat(null);
+  useEffect(() => {
+    if (currentHandIdRef.current !== g.handId) {
+      pushDebug("HAND_CHANGED", `from=${currentHandIdRef.current} to=${g.handId}`);
+      currentHandIdRef.current = g.handId;
+      presentedTrickIdRef.current = null;
+      deferredEvents.current = [];
+      for (const timer of deferredPlaybackTimers.current) clearTimeout(timer);
+      deferredPlaybackTimers.current = [];
+      deferredPlaybackPending.current = 0;
+      setDisplayedTrick([]);
+      setTrickWinnerSeat(null);
+      phaseRef.current = "cleared";
+      setTrickPhase("cleared");
+      setPresentedPhase(g.phase);
+      setPresentedTurnSeat(g.turnSeat);
+      setPresentedMessage(g.message);
+      setPresentedDominoCounts(
+        Object.fromEntries(view.players.map((player) => [player.seat, 7])),
+      );
+    }
+  }, [g.handId, g.message, g.phase, g.turnSeat, pushDebug, view.players]);
+
+  useEffect(() => {
+    if (g.phase === "playing") {
+      if (
+        presentedTrickIdRef.current === null &&
+        displayedTrick.length === 0 &&
+        phaseRef.current === "cleared"
+      ) {
+        setPresentedPhase("playing");
+        setPresentedTurnSeat(g.turnSeat);
+        setPresentedMessage(g.message);
+        setPresentedDominoCounts(
+          Object.fromEntries(view.players.map((player) => [player.seat, player.dominoCount])),
+        );
+        pushDebug(
+          "PRESENTATION_PLAY_START",
+          `hand=${g.handId} turn=${g.turnSeat} message=${g.message}`,
+        );
       }
       return;
     }
-
-    if (g.trick.length < count) {
-      hiddenCompletedTrickSignature.current = null;
-      if (collectingTrick) setCollectingTrick(false);
-      if (trickWinnerSeat !== null) setTrickWinnerSeat(null);
-    }
-
-    setDisplayedTrick((prev) =>
-      g.trick.map((play, index) => {
-        const existing = prev[index];
-        if (existing && existing.seat === play.seat && existing.domino === play.domino)
-          return existing;
-        trickPlayId.current += 1;
-        return { ...play, id: trickPlayId.current };
-      }),
+    if (g.phase === "hand-end" || g.phase === "complete") return;
+    setPresentedPhase(g.phase);
+    setPresentedTurnSeat(g.turnSeat);
+    setPresentedMessage(g.message);
+    setPresentedDominoCounts(
+      Object.fromEntries(view.players.map((player) => [player.seat, player.dominoCount])),
     );
+  }, [
+    displayedTrick.length,
+    g.handId,
+    g.message,
+    g.phase,
+    g.turnSeat,
+    pushDebug,
+    view.players,
+  ]);
 
-    if (g.trick.length === count) {
-      const lastPlay = g.trick[g.trick.length - 1];
-      const clearDelay =
-        lastPlay && bySeat(lastPlay.seat)?.isAI
-          ? TRICK_CLEAR_DELAY_AI_LAST_MS
-          : TRICK_CLEAR_DELAY_MS;
-      setTrickWinnerSeat(g.turnSeat);
-      setCollectingTrick(true);
-      trickClearTimer.current = setTimeout(() => {
-        hiddenCompletedTrickSignature.current = signature;
-        setDisplayedTrick([]);
-        setCollectingTrick(false);
-        setTrickWinnerSeat(null);
-        trickClearTimer.current = null;
-      }, clearDelay);
+  const processDeferredQueue = () => {
+    if (!deferredEvents.current.length) return;
+    if (phaseRef.current === "winnerHold" || phaseRef.current === "collecting") {
+      pushDebug("QUEUE_DRAIN_BLOCKED", `phase=${phaseRef.current} pending=${deferredEvents.current.length}`);
+      if (queueDrainTimer.current) clearTimeout(queueDrainTimer.current);
+      queueDrainTimer.current = setTimeout(() => {
+        queueDrainTimer.current = null;
+        processDeferredQueue();
+      }, 0);
+      return;
     }
-  }, [collectingTrick, count, displayedTrick.length, g.trick, g.turnSeat, trickWinnerSeat]);
+    pushDebug("QUEUE_DRAIN_START", `count=${deferredEvents.current.length}`);
+    const queued = [...deferredEvents.current].sort((a, b) => a.seq - b.seq);
+    deferredEvents.current = [];
+    for (const timer of deferredPlaybackTimers.current) clearTimeout(timer);
+    deferredPlaybackTimers.current = [];
+    deferredPlaybackPending.current = queued.length;
+    queued.forEach((envelope, index) => {
+      const timer = setTimeout(() => {
+        applyEvent(envelope, true);
+        deferredPlaybackPending.current = Math.max(0, deferredPlaybackPending.current - 1);
+      }, DEFERRED_EVENT_INITIAL_DELAY_MS + index * DEFERRED_EVENT_STAGGER_MS);
+      deferredPlaybackTimers.current.push(timer);
+    });
+    pushDebug(
+      "QUEUE_PLAYBACK_SCHEDULED",
+      `count=${queued.length} delayMs=${DEFERRED_EVENT_INITIAL_DELAY_MS} staggerMs=${DEFERRED_EVENT_STAGGER_MS}`,
+    );
+    pushDebug("QUEUE_DRAIN_END", `remaining=${deferredEvents.current.length}`);
+  };
 
+  const startWinnerSequence = (winnerSeat: number) => {
+    if (clearTimeline.current) clearTimeline.current();
+    pushDebug("PHASE_WINNER_HOLD", `winnerSeat=${winnerSeat} trickId=${presentedTrickIdRef.current}`);
+    setTrickWinnerSeat(winnerSeat);
+    phaseRef.current = "winnerHold";
+    setTrickPhase("winnerHold");
+    clearTimeline.current = scheduleTrickTimeline(
+      () => {
+        pushDebug("PHASE_COLLECTING", `trickId=${presentedTrickIdRef.current}`);
+        phaseRef.current = "collecting";
+        setTrickPhase("collecting");
+      },
+      () => {
+        pushDebug("PHASE_CLEARED", `trickId=${presentedTrickIdRef.current}`);
+        setDisplayedTrick([]);
+        setTrickWinnerSeat(null);
+        phaseRef.current = "cleared";
+        setTrickPhase("cleared");
+        // Keep last presented trick latched so snapshot fallback cannot
+        // re-hydrate the same completed trick while waiting for next lead.
+        if (queueDrainTimer.current) clearTimeout(queueDrainTimer.current);
+        queueDrainTimer.current = setTimeout(() => {
+          queueDrainTimer.current = null;
+          processDeferredQueue();
+        }, POST_CLEAR_PLAYBACK_DELAY_MS);
+      },
+      TRICK_WINNER_DISPLAY_MS,
+      TRICK_COLLECT_ANIMATION_MS,
+    );
+  };
+
+  const applyEvent = (envelope: EventEnvelope, fromDeferred = false) => {
+    const roomEvent = envelope.event;
+    pushDebug(
+      "EVENT_RECEIVED",
+      `seq=${envelope.seq} type=${roomEvent.type} hand=${roomEvent.handId}${"trickId" in roomEvent ? ` trick=${roomEvent.trickId}` : ""}${fromDeferred ? " deferred=true" : ""}`,
+    );
+    if (roomEvent.handId !== g.handId) return;
+    const currentlyLocked = phaseRef.current === "winnerHold" || phaseRef.current === "collecting";
+    const isTrickEvent = roomEvent.type === "PLAY_ADDED" || roomEvent.type === "TRICK_COMPLETED";
+    if (
+      isTrickEvent &&
+      currentlyLocked &&
+      presentedTrickIdRef.current !== null &&
+      roomEvent.trickId !== presentedTrickIdRef.current
+    ) {
+      deferredEvents.current.push(envelope);
+      pushDebug(
+        "EVENT_DEFERRED",
+        `seq=${envelope.seq} currentTrick=${presentedTrickIdRef.current} incomingTrick=${roomEvent.trickId} phase=${phaseRef.current}`,
+      );
+      return;
+    }
+    if (
+      roomEvent.type === "HAND_COMPLETED" &&
+      (phaseRef.current === "winnerHold" || phaseRef.current === "collecting")
+    ) {
+      deferredEvents.current.push(envelope);
+      pushDebug("EVENT_DEFERRED", `seq=${envelope.seq} type=HAND_COMPLETED phase=${phaseRef.current}`);
+      return;
+    }
+
+    if (roomEvent.type === "PLAY_ADDED") {
+      if (presentedTrickIdRef.current !== roomEvent.trickId) {
+        pushDebug("TRICK_SWITCH", `from=${presentedTrickIdRef.current} to=${roomEvent.trickId}`);
+        presentedTrickIdRef.current = roomEvent.trickId;
+        setDisplayedTrick([]);
+      }
+      if (phaseRef.current === "cleared") {
+        phaseRef.current = "building";
+        setTrickPhase("building");
+      }
+      setPresentedPhase("playing");
+      setPresentedDominoCounts((previous) => ({
+        ...previous,
+        [roomEvent.seat]: Math.max(0, (previous[roomEvent.seat] ?? 1) - 1),
+      }));
+      const nextSeat = (roomEvent.seat + 1) % count;
+      setPresentedTurnSeat(nextSeat);
+      setPresentedMessage(`${bySeat(nextSeat)?.name ?? "Next player"} follows.`);
+      setDisplayedTrick((prev) => {
+        const existingIndex = prev.findIndex((play) => play.playId === roomEvent.playId);
+        if (existingIndex >= 0) {
+          return prev;
+        }
+        return prev.concat({
+          id: `play-${roomEvent.playId}`,
+          playId: roomEvent.playId,
+          trickId: roomEvent.trickId,
+          seat: roomEvent.seat,
+          domino: roomEvent.domino,
+          noEntryAnimation: false,
+        });
+      });
+      return;
+    }
+
+    if (roomEvent.type === "TRICK_COMPLETED") {
+      if (presentedTrickIdRef.current !== roomEvent.trickId) {
+        presentedTrickIdRef.current = roomEvent.trickId;
+      }
+      setDisplayedTrick(
+        roomEvent.plays.map((play) => ({
+          id: `play-${play.playId}`,
+          playId: play.playId,
+          trickId: roomEvent.trickId,
+          seat: play.seat,
+          domino: play.domino,
+          noEntryAnimation: fromDeferred,
+        })),
+      );
+      setPresentedTurnSeat(roomEvent.winnerSeat);
+      setPresentedMessage(`${bySeat(roomEvent.winnerSeat)?.name ?? "Player"} wins the trick.`);
+      startWinnerSequence(roomEvent.winnerSeat);
+      return;
+    }
+
+    if (roomEvent.type === "HAND_COMPLETED") {
+      pushDebug("HAND_COMPLETED_EVENT", `phase=${roomEvent.phase}`);
+      deferredEvents.current = [];
+      setPresentedPhase(roomEvent.phase);
+      setPresentedTurnSeat(null);
+      setPresentedMessage(roomEvent.message);
+    }
+  };
+
+  useEffect(() => {
+    if (!presentationSync) return;
+    if (appliedPresentationSync.current === presentationSync) return;
+    appliedPresentationSync.current = presentationSync;
+    if (presentationSync.snapshot.revision < view.revision) {
+      processedSeq.current = presentationSync.seq;
+      currentHandIdRef.current = g.handId;
+      presentedTrickIdRef.current = null;
+      deferredEvents.current = [];
+      setDisplayedTrick([]);
+      setTrickWinnerSeat(null);
+      phaseRef.current = "cleared";
+      setTrickPhase("cleared");
+      setPresentedPhase(g.phase);
+      setPresentedTurnSeat(g.turnSeat);
+      setPresentedMessage(g.message);
+      setPresentedDominoCounts(
+        Object.fromEntries(
+          view.players.map((player) => [
+            player.seat,
+            g.phase === "playing" ? 7 : player.dominoCount,
+          ]),
+        ),
+      );
+      pushDebug(
+        "PRESENTATION_SYNC_STALE",
+        `syncRevision=${presentationSync.snapshot.revision} currentRevision=${view.revision} usingCurrentHand=${g.handId} phase=${g.phase}`,
+      );
+      return;
+    }
+    const snapshot = presentationSync.snapshot.game;
+    if (clearTimeline.current) clearTimeline.current();
+    if (queueDrainTimer.current) clearTimeout(queueDrainTimer.current);
+    for (const timer of deferredPlaybackTimers.current) clearTimeout(timer);
+    deferredPlaybackTimers.current = [];
+    deferredPlaybackPending.current = 0;
+    deferredEvents.current = [];
+    processedSeq.current = presentationSync.seq;
+    currentHandIdRef.current = snapshot.handId;
+    presentedTrickIdRef.current = snapshot.trick.length ? snapshot.trickId : null;
+    setTrickWinnerSeat(null);
+    setPresentedPhase(snapshot.phase);
+    setPresentedTurnSeat(snapshot.turnSeat);
+    setPresentedMessage(snapshot.message);
+    setPresentedDominoCounts(
+      Object.fromEntries(
+        presentationSync.snapshot.players.map((player) => [player.seat, player.dominoCount]),
+      ),
+    );
+    setDisplayedTrick(
+      snapshot.trick.map((play, index) => ({
+        id: `sync-${snapshot.handId}-${snapshot.trickId}-${index}`,
+        playId: -1 - index,
+        trickId: snapshot.trickId,
+        seat: play.seat,
+        domino: play.domino,
+        noEntryAnimation: true,
+      })),
+    );
+    pushDebug(
+      "PRESENTATION_SYNC",
+      `reason=${presentationSync.reason} seq=${presentationSync.seq} hand=${snapshot.handId} trick=${snapshot.trickId} plays=${snapshot.trick.length}`,
+    );
+    if (snapshot.phase === "playing" && snapshot.trick.length === count) {
+      presentedTrickIdRef.current = snapshot.trickId;
+      startWinnerSequence(snapshot.turnSeat ?? snapshot.trick.at(-1)?.seat ?? 0);
+    } else {
+      const nextPhase = snapshot.trick.length ? "building" : "cleared";
+      phaseRef.current = nextPhase;
+      setTrickPhase(nextPhase);
+    }
+  }, [count, g.handId, g.message, g.phase, g.turnSeat, presentationSync, pushDebug, view]);
+
+  useEffect(() => {
+    for (const envelope of events) {
+      if (envelope.seq <= processedSeq.current) continue;
+      if (envelope.seq > processedSeq.current + 1) {
+        pushDebug(
+          "SEQ_GAP_WAIT",
+          `expected=${processedSeq.current + 1} incoming=${envelope.seq}`,
+        );
+        return;
+      }
+      processedSeq.current = envelope.seq;
+      applyEvent(envelope, false);
+    }
+  }, [events, g.handId, pushDebug]);
+
+  const showTrickWinner = trickPhase === "winnerHold";
+  const collectingTrick = trickPhase === "collecting";
   const bidLabel = g.highBid
     ? (view.gameType === "texas42" && g.highBid > 42
         ? `${g.highBid / 42} marks`
         : String(g.highBid)) + ` — ${bySeat(g.bidderSeat!)?.name}`
     : "Open";
+  const trickWinnerName =
+    trickWinnerSeat === null ? null : bySeat(trickWinnerSeat)?.name ?? null;
+  const openingLeader =
+    g.openingLeaderSeat === null ? null : bySeat(g.openingLeaderSeat);
+  const presentationGame = {
+    ...g,
+    phase: presentedPhase,
+    turnSeat: presentedTurnSeat,
+    message: presentedMessage,
+  };
+  const presentedCount = (seat: number | undefined) =>
+    seat === undefined ? 0 : presentedDominoCounts[seat] ?? 0;
   return (
     <main className="game-shell">
       <header className="game-header">
@@ -568,47 +993,149 @@ function Game({
         <PlayerCard
           p={relative(1)}
           pos="west"
-          active={g.turnSeat === relative(1)?.seat}
+          active={presentedTurnSeat === relative(1)?.seat}
         />
         <PlayerCard
           p={relative(2)}
           pos="north"
-          active={g.turnSeat === relative(2)?.seat}
+          active={presentedTurnSeat === relative(2)?.seat}
         />
         {view.gameType === "texas42" && (
           <PlayerCard
             p={relative(3)}
             pos="east"
-            active={g.turnSeat === relative(3)?.seat}
+            active={presentedTurnSeat === relative(3)?.seat}
           />
         )}
-        <HiddenHand count={relative(1)?.dominoCount || 0} pos="west" />
-        <HiddenHand count={relative(2)?.dominoCount || 0} pos="north" />
+        <HiddenHand
+          count={presentedCount(relative(1)?.seat)}
+          pos="west"
+          active={presentedTurnSeat === relative(1)?.seat}
+        />
+        <HiddenHand
+          count={presentedCount(relative(2)?.seat)}
+          pos="north"
+          active={presentedTurnSeat === relative(2)?.seat}
+        />
         {view.gameType === "texas42" && (
-          <HiddenHand count={relative(3)?.dominoCount || 0} pos="east" />
+          <HiddenHand
+            count={presentedCount(relative(3)?.seat)}
+            pos="east"
+            active={presentedTurnSeat === relative(3)?.seat}
+          />
+        )}
+        {showOpeningDraw && g.openingDraw.length > 0 && (
+          <section className="opening-draw" role="status" aria-live="polite">
+            <strong>Draw for first lead</strong>
+            <div className="opening-draw-list">
+              {g.openingDraw.map((draw) => {
+                const player = bySeat(draw.seat);
+                const ownerLabel = draw.seat === me?.seat ? "You" : player?.name || "Player";
+                const isLeader = draw.seat === g.openingLeaderSeat;
+                return (
+                  <article key={`${draw.seat}-${draw.domino}`} className={isLeader ? "leader" : ""}>
+                    <Domino value={draw.domino} />
+                    <span>{ownerLabel}</span>
+                  </article>
+                );
+              })}
+            </div>
+            <p>
+              <b>{openingLeader?.name || "Winner"}</b> drew highest and opens the bidding.
+            </p>
+          </section>
         )}
         <div
-          className={`trick ${collectingTrick ? `collecting ${trickCollectClass(trickWinnerSeat)}` : ""}`}
+          ref={trickElement}
+          className={`trick ${showTrickWinner ? "winner-spotlight" : ""} ${collectingTrick ? `collecting ${trickCollectClass(trickWinnerSeat)}` : ""}`}
+          onAnimationStart={(event) => {
+            const node = event.target as HTMLElement;
+            if (node.classList.contains("trick-play")) {
+              pushDebug(
+                "ANIMATION_START",
+                `name=${event.animationName} trick=${node.dataset.trickId} play=${node.dataset.playId}`,
+              );
+            }
+          }}
+          onAnimationEnd={(event) => {
+            const node = event.target as HTMLElement;
+            if (node.classList.contains("trick-play")) {
+              pushDebug(
+                "ANIMATION_END",
+                `name=${event.animationName} trick=${node.dataset.trickId} play=${node.dataset.playId}`,
+              );
+            }
+          }}
+          onTransitionEnd={(event) => {
+            const node = event.target as HTMLElement;
+            if (node.classList.contains("trick-play")) {
+              pushDebug(
+                "TRANSITION_END",
+                `property=${event.propertyName} phase=${phaseRef.current} trick=${node.dataset.trickId} play=${node.dataset.playId}`,
+              );
+            }
+          }}
         >
           {displayedTrick.map((play) => (
             <div
               key={play.id}
-              className={`trick-play ${trickOriginClass(play.seat)}`}
+              data-trick-id={play.trickId}
+              data-play-id={play.playId}
+              className={`trick-play ${trickOriginClass(play.seat)} ${showTrickWinner && play.seat === trickWinnerSeat ? "winner" : ""} ${play.noEntryAnimation || collectingTrick ? "no-entry" : ""}`}
             >
               <Domino value={play.domino} />
             </div>
           ))}
         </div>
+        {showTrickWinner && trickWinnerName && (
+          <div className="trick-winner-banner">
+            <strong>{trickWinnerName}</strong> wins the trick
+          </div>
+        )}
         {g.widowCount > 0 && (
           <div className="widow">
             <Domino hidden />
             <span>Widow</span>
           </div>
         )}
-        <div className="message">{g.message}</div>
+        {presentedPhase === "hand-end" && (
+          <section className="table-center-overlay hand-result-modal" role="status" aria-live="polite">
+            <h2>Hand complete</h2>
+            <p>{presentedMessage}</p>
+            {view.gameType === "texas42" ? (
+              <div className="result-grid">
+                <span>Hand points</span>
+                <b>
+                  Team 1 {g.teamHandPoints[0]} - Team 2 {g.teamHandPoints[1]}
+                </b>
+                <span>Total marks</span>
+                <b>
+                  Team 1 {g.teamMarks[0]} - Team 2 {g.teamMarks[1]}
+                </b>
+              </div>
+            ) : (
+              <div className="result-grid">
+                {view.players
+                  .slice()
+                  .sort((a, b) => b.score - a.score)
+                  .map((player) => (
+                    <span key={player.id}>
+                      {player.name}: {player.score} points
+                    </span>
+                  ))}
+              </div>
+            )}
+            <div className="game-modal-actions">
+              <button className="primary" onClick={() => send("NEXT_HAND")}>
+                Deal next hand
+              </button>
+            </div>
+          </section>
+        )}
+        <div className="message">{presentedMessage}</div>
       </section>
       <section
-        className={`hand ${g.turnSeat === me?.seat ? "active-hand" : ""}`}
+        className={`hand ${presentedTurnSeat === me?.seat ? "active-hand" : ""}`}
       >
         <div>
           <strong>
@@ -626,9 +1153,9 @@ function Game({
             <Domino
               key={d}
               value={d}
-              legal={g.phase === "playing" && g.turnSeat === me?.seat}
+              legal={presentedPhase === "playing" && presentedTurnSeat === me?.seat}
               onClick={
-                g.phase === "playing" && g.turnSeat === me?.seat
+                presentedPhase === "playing" && presentedTurnSeat === me?.seat
                   ? () => send("PLAY_DOMINO", { domino: d })
                   : undefined
               }
@@ -637,24 +1164,24 @@ function Game({
         </div>
       </section>
       <Decision
-        g={g}
+        g={presentationGame}
         rules={view.rules}
         gameType={view.gameType}
         meSeat={me?.seat ?? null}
-        turnName={g.turnSeat === null ? null : bySeat(g.turnSeat)?.name ?? null}
+        turnName={presentedTurnSeat === null ? null : bySeat(presentedTurnSeat)?.name ?? null}
         bidderName={g.bidderSeat === null ? null : bySeat(g.bidderSeat)?.name ?? null}
         send={send}
       />
-      {g.phase === "complete" && (
+      {presentedPhase === "complete" && (
         <div className="game-modal-backdrop" role="presentation">
           <section
-            className="game-modal"
+            className="game-modal game-over-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="game-over-title"
           >
             <h2 id="game-over-title">Game over</h2>
-            <p>{g.message}</p>
+            <p>{presentedMessage}</p>
             {view.gameType === "texas42" ? (
               <p className="game-over-detail">
                 Final marks: Team 1 {g.teamMarks[0]} - Team 2 {g.teamMarks[1]}
@@ -680,6 +1207,34 @@ function Game({
           </section>
         </div>
       )}
+      {debugEnabled && (
+        <section className="debug-log-panel">
+          <header>
+            <strong>Render debug</strong>
+            <div>
+              <button onClick={() => setDebugOpen((open) => !open)}>
+                {debugOpen ? "Collapse" : "Expand"}
+              </button>
+              <button
+                onClick={() => {
+                  const body = debugLines.join("\n");
+                  void navigator.clipboard.writeText(body);
+                }}
+              >
+                Copy log
+              </button>
+              <button onClick={() => setDebugLines([])}>Clear</button>
+            </div>
+          </header>
+          {debugOpen && (
+            <pre>
+              {debugLines.length
+                ? debugLines.join("\n")
+                : "No debug events yet. Play a trick to capture the timeline."}
+            </pre>
+          )}
+        </section>
+      )}
     </main>
   );
 }
@@ -702,13 +1257,22 @@ function PlayerCard({
         <small>
           {p?.score} pts · {p?.tricks} tricks
         </small>
+        {active && <small className="turn-indicator">Taking turn</small>}
       </div>
     </div>
   );
 }
-function HiddenHand({ count, pos }: { count: number; pos: string }) {
+function HiddenHand({
+  count,
+  pos,
+  active = false,
+}: {
+  count: number;
+  pos: string;
+  active?: boolean;
+}) {
   return (
-    <div className={`hidden-hand ${pos}`}>
+    <div className={`hidden-hand ${pos} ${active ? "active" : ""}`}>
       {Array.from({ length: count }, (_, i) => (
         <Domino hidden key={i} />
       ))}
@@ -865,14 +1429,7 @@ function Decision({
       </section>
     );
   if (g.phase === "hand-end")
-    return (
-      <section className="decision">
-        <strong>{g.message}</strong>
-        <button className="primary" onClick={() => send("NEXT_HAND")}>
-          Deal next hand
-        </button>
-      </section>
-    );
+    return null;
   if (g.phase === "complete")
     return null;
   return null;
