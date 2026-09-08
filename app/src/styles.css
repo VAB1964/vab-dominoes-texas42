@@ -47,7 +47,7 @@
 .pip-half.pip-value-4 .pip{background:#ae6bff}
 .pip-half.pip-value-5 .pip{background:#ff6ec7}
 .pip-half.pip-value-6 .pip{background:#ff9a3d}
-@keyframes player-turn-pulse{0%{box-shadow:0 0 0 2px #ffd67544,0 0 12px #f3b84b3a}50%{box-shadow:0 0 0 4px #ffd67577,0 0 26px #f3b84b8c}100%{box-shadow:0 0 0 2px #ffd67544,0 0 12px #f3b84b3a}}
+@keyframes player-turn-pulse{0%{box-shadow:0 0 0 2px var(--player-color-glow,#ffd67544),0 0 12px var(--player-color-glow,#f3b84b3a)}50%{box-shadow:0 0 0 4px var(--player-color-glow,#ffd67577),0 0 26px var(--player-color-glow,#f3b84b8c)}100%{box-shadow:0 0 0 2px var(--player-color-glow,#ffd67544),0 0 12px var(--player-color-glow,#f3b84b3a)}}
 @keyframes winner-domino-pop{0%{transform:translateY(0) scale(1)}100%{transform:translateY(-8px) scale(1.08)}}
 @media(max-width:700px){.opening-draw{top:72px;width:min(620px,93%)}.opening-draw-list article{min-width:76px}.trick-winner-banner{top:calc(50% + 82px);font-size:.95rem;width:min(360px,88%)}.table-center-overlay{width:min(460px,93%);padding:.82rem .72rem}}
 .debug-log-panel{width:min(1040px,calc(100% - 1rem));margin:.55rem auto 0;padding:.6rem .7rem;border:1px solid #ffffff2b;border-radius:.8rem;background:#090b16dd}
@@ -55,3 +55,16 @@
 .debug-log-panel header div{display:flex;gap:.4rem;flex-wrap:wrap}
 .debug-log-panel strong{color:#ffd675}
 .debug-log-panel pre{max-height:260px;overflow:auto;margin:.55rem 0 0;padding:.5rem .55rem;border-radius:.55rem;background:#05070f;color:#d6dfec;font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;white-space:pre-wrap}
+.player-color-0{--player-color:#ff5b5b;--player-color-glow:#ff5b5b55}
+.player-color-1{--player-color:#4ea2ff;--player-color-glow:#4ea2ff55}
+.player-color-2{--player-color:#4dd26b;--player-color-glow:#4dd26b55}
+.player-color-3{--player-color:#ae6bff;--player-color-glow:#ae6bff55}
+.player[class*="player-color-"]{border-color:var(--player-color);box-shadow:0 0 0 2px var(--player-color-glow),0 7px 15px #0006}
+.player[class*="player-color-"] .avatar{background:linear-gradient(145deg,var(--player-color),#242033)}
+.player[class*="player-color-"].active{border-color:var(--player-color);box-shadow:0 0 0 4px var(--player-color-glow),0 0 24px var(--player-color-glow)}
+.hidden-hand[class*="player-color-"].active .domino-back{border-color:var(--player-color);box-shadow:0 0 0 2px var(--player-color-glow)}
+.trick-play[class*="player-color-"] .domino{border-color:var(--player-color);box-shadow:0 0 0 3px var(--player-color-glow),0 7px 12px #0006}
+.hand[class*="player-color-"]{border-color:var(--player-color-glow)}
+.hand.active-hand[class*="player-color-"]{border-color:var(--player-color);background:color-mix(in srgb,var(--player-color) 10%,transparent);box-shadow:0 0 0 2px var(--player-color-glow)}
+.hand.waiting-for-trick{opacity:.62;filter:saturate(.72);transition:opacity .2s ease,filter .2s ease}
+.hand.waiting-for-trick .domino{cursor:not-allowed}

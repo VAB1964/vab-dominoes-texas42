@@ -38,6 +38,7 @@ const defaults: Rules = {
 };
 const OPENING_DRAW_DISPLAY_MS = 5000;
 const BUTTON_CLICK_VOLUME = 0.03;
+const PLAYER_NOTES = [523.25, 659.25, 783.99, 880] as const;
 const MAX_DEBUG_LINES = 500;
 const DEFERRED_EVENT_STAGGER_MS = 100;
 const POST_CLEAR_PLAYBACK_DELAY_MS = 120;
@@ -74,6 +75,31 @@ export default function App() {
   const [error, setError] = useState("");
   const client = useRef<RoomClient | null>(null);
   const clickAudioContext = useRef<AudioContext | null>(null);
+  const playPlayerTone = useCallback((seat: number) => {
+    const context = clickAudioContext.current;
+    if (!context || context.state === "closed") return;
+    if (context.state === "suspended") void context.resume();
+    const start = context.currentTime + 0.008;
+    const frequency = PLAYER_NOTES[seat] ?? PLAYER_NOTES[0];
+    (
+      [
+        ["sine", frequency, 0.038],
+        ["triangle", frequency * 2, 0.009],
+      ] as const
+    ).forEach(([wave, hz, peak]) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = wave;
+      oscillator.frequency.setValueAtTime(hz, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(peak, start + 0.012);
+      gain.gain.exponentialRampToValueAtTime(peak * 0.62, start + 0.13);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.32);
+      oscillator.connect(gain).connect(context.destination);
+      oscillator.start(start);
+      oscillator.stop(start + 0.33);
+    });
+  }, []);
 
   useEffect(() => {
     const playClick = () => {
@@ -170,6 +196,7 @@ export default function App() {
         view={view}
         events={events}
         presentationSync={presentationSync}
+        playPlayerTone={playPlayerTone}
         playerId={client.current?.playerId || ""}
         error={error}
         send={(t, p) => client.current?.send(t, p)}
@@ -475,6 +502,7 @@ function Game({
   view,
   events,
   presentationSync,
+  playPlayerTone,
   playerId,
   error,
   send,
@@ -483,6 +511,7 @@ function Game({
   view: RoomView;
   events: EventEnvelope[];
   presentationSync: PresentationSync | null;
+  playPlayerTone: (seat: number) => void;
   playerId: string;
   error: string;
   send: (t: string, p?: unknown) => void;
@@ -520,7 +549,7 @@ function Game({
   const currentHandIdRef = useRef<number>(g.handId);
   const sessionStartMs = useRef(Date.now());
   const debugEnabled = useMemo(
-    () => new URLSearchParams(location.search).has("debugRender") || localStorage.getItem("moon.debugRender") === "1",
+    () => new URLSearchParams(location.search).get("debugRender") === "1",
     [],
   );
   const pushDebug = useCallback(
@@ -799,6 +828,7 @@ function Game({
       const nextSeat = (roomEvent.seat + 1) % count;
       setPresentedTurnSeat(nextSeat);
       setPresentedMessage(`${bySeat(nextSeat)?.name ?? "Next player"} follows.`);
+      playPlayerTone(roomEvent.seat);
       setDisplayedTrick((prev) => {
         const existingIndex = prev.findIndex((play) => play.playId === roomEvent.playId);
         if (existingIndex >= 0) {
@@ -952,6 +982,14 @@ function Game({
   };
   const presentedCount = (seat: number | undefined) =>
     seat === undefined ? 0 : presentedDominoCounts[seat] ?? 0;
+  const waitingForTrick =
+    presentedPhase === "playing" &&
+    presentedTurnSeat === me?.seat &&
+    (trickPhase === "winnerHold" || trickPhase === "collecting");
+  const canPlay =
+    presentedPhase === "playing" &&
+    presentedTurnSeat === me?.seat &&
+    !waitingForTrick;
   return (
     <main className="game-shell">
       <header className="game-header">
@@ -1010,17 +1048,20 @@ function Game({
         <HiddenHand
           count={presentedCount(relative(1)?.seat)}
           pos="west"
+          seat={relative(1)?.seat}
           active={presentedTurnSeat === relative(1)?.seat}
         />
         <HiddenHand
           count={presentedCount(relative(2)?.seat)}
           pos="north"
+          seat={relative(2)?.seat}
           active={presentedTurnSeat === relative(2)?.seat}
         />
         {view.gameType === "texas42" && (
           <HiddenHand
             count={presentedCount(relative(3)?.seat)}
             pos="east"
+            seat={relative(3)?.seat}
             active={presentedTurnSeat === relative(3)?.seat}
           />
         )}
@@ -1081,7 +1122,7 @@ function Game({
               key={play.id}
               data-trick-id={play.trickId}
               data-play-id={play.playId}
-              className={`trick-play ${trickOriginClass(play.seat)} ${showTrickWinner && play.seat === trickWinnerSeat ? "winner" : ""} ${play.noEntryAnimation || collectingTrick ? "no-entry" : ""}`}
+              className={`trick-play player-color-${play.seat} ${trickOriginClass(play.seat)} ${showTrickWinner && play.seat === trickWinnerSeat ? "winner" : ""} ${play.noEntryAnimation || collectingTrick ? "no-entry" : ""}`}
             >
               <Domino value={play.domino} />
             </div>
@@ -1135,7 +1176,7 @@ function Game({
         <div className="message">{presentedMessage}</div>
       </section>
       <section
-        className={`hand ${presentedTurnSeat === me?.seat ? "active-hand" : ""}`}
+        className={`hand player-color-${me?.seat ?? 0} ${canPlay ? "active-hand" : ""} ${waitingForTrick ? "waiting-for-trick" : ""}`}
       >
         <div>
           <strong>
@@ -1143,9 +1184,11 @@ function Game({
             {view.gameType === "texas42" ? `· Team ${(me?.team ?? 0) + 1}` : ""}
           </strong>
           <span>
-            {view.gameType === "moon"
-              ? `${me?.score} points · ${me?.tricks} tricks`
-              : `${me?.handPoints} hand points · ${me?.tricks} tricks`}
+            {waitingForTrick
+              ? "Waiting for the trick to clear…"
+              : view.gameType === "moon"
+                ? `${me?.score} points · ${me?.tricks} tricks`
+                : `${me?.handPoints} hand points · ${me?.tricks} tricks`}
           </span>
         </div>
         <div className="hand-dominoes">
@@ -1153,9 +1196,9 @@ function Game({
             <Domino
               key={d}
               value={d}
-              legal={presentedPhase === "playing" && presentedTurnSeat === me?.seat}
+              legal={canPlay}
               onClick={
-                presentedPhase === "playing" && presentedTurnSeat === me?.seat
+                canPlay
                   ? () => send("PLAY_DOMINO", { domino: d })
                   : undefined
               }
@@ -1248,7 +1291,7 @@ function PlayerCard({
   active: boolean;
 }) {
   return (
-    <div className={`player ${pos} ${active ? "active" : ""}`}>
+    <div className={`player player-color-${p?.seat ?? 0} ${pos} ${active ? "active" : ""}`}>
       <span className="avatar">
         {p?.isAI ? "AI" : p?.name.slice(0, 2).toUpperCase()}
       </span>
@@ -1265,14 +1308,16 @@ function PlayerCard({
 function HiddenHand({
   count,
   pos,
+  seat,
   active = false,
 }: {
   count: number;
   pos: string;
+  seat?: number;
   active?: boolean;
 }) {
   return (
-    <div className={`hidden-hand ${pos} ${active ? "active" : ""}`}>
+    <div className={`hidden-hand player-color-${seat ?? 0} ${pos} ${active ? "active" : ""}`}>
       {Array.from({ length: count }, (_, i) => (
         <Domino hidden key={i} />
       ))}

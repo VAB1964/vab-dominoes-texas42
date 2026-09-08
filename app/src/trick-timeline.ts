@@ -1,4 +1,4 @@
-export const TRICK_WINNER_DISPLAY_MS = 5000;
+export const TRICK_WINNER_DISPLAY_MS = 3000;
 export const TRICK_COLLECT_ANIMATION_MS = 500;
 
 export function scheduleTrickTimeline(
