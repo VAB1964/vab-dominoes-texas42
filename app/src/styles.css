@@ -68,3 +68,25 @@
 .hand.active-hand[class*="player-color-"]{border-color:var(--player-color);background:color-mix(in srgb,var(--player-color) 10%,transparent);box-shadow:0 0 0 2px var(--player-color-glow)}
 .hand.waiting-for-trick{opacity:.62;filter:saturate(.72);transition:opacity .2s ease,filter .2s ease}
 .hand.waiting-for-trick .domino{cursor:not-allowed}
+.specialty-help{display:block;max-width:620px;margin:.55rem auto 0;color:#d8c9aa;line-height:1.35}
+.learn-button{width:100%;display:grid;gap:.2rem;margin:1rem 0;padding:1rem;text-align:left;border-color:#ffd675;background:linear-gradient(135deg,#ffd67520,#ae6bff20);box-shadow:0 0 0 2px #ffd67520}
+.learn-button span{color:#d8c9aa}
+.tutorial-resume{width:100%;margin:.8rem 0}
+.tutorial-progress{height:5px;background:#ffffff12}
+.tutorial-progress i{display:block;height:100%;background:linear-gradient(90deg,#4ea2ff,#4dd26b);transition:width .25s ease}
+.tutorial-shell{padding-bottom:300px}
+.tutorial-shell .table{margin-top:.25rem}
+.tutorial-focus{z-index:9;outline:3px solid #ffd675;outline-offset:5px;box-shadow:0 0 0 8px #ffd67525,0 0 32px #ffd6754f!important;animation:tutorial-focus-pulse 1.5s ease-in-out infinite}
+.status.tutorial-focus,.hand.tutorial-focus,.decision.tutorial-focus{position:relative}
+.trick.tutorial-focus{min-width:0}
+.tutorial-coach{position:fixed;z-index:20;right:1rem;bottom:1rem;width:min(440px,calc(100% - 2rem));padding:1rem 1.1rem;border:2px solid #ffd675;border-radius:1rem;background:linear-gradient(155deg,#252c50f5,#171b2ffa);box-shadow:0 18px 44px #000b}
+.tutorial-coach h2{margin:.2rem 0 .4rem}
+.tutorial-coach p{margin:.35rem 0 .65rem;color:#e5d9c1}
+.tutorial-coach>strong{display:block;color:#fff6db}
+.tutorial-feedback{padding:.45rem .55rem;border-left:3px solid #ff9a3d;background:#ff9a3d16;color:#ffe3bd!important}
+.tutorial-nav{display:flex;justify-content:flex-end;gap:.4rem;margin-top:.8rem;flex-wrap:wrap}
+.tutorial-controls{position:relative}
+.tutorial-complete .actions{justify-content:center}
+@keyframes tutorial-focus-pulse{0%,100%{outline-color:#ffd675;box-shadow:0 0 0 7px #ffd67520,0 0 24px #ffd6753d}50%{outline-color:#fff0b8;box-shadow:0 0 0 10px #ffd6752b,0 0 38px #ffd67560}}
+@media(max-width:700px){.tutorial-shell{padding-bottom:1rem}.tutorial-coach{position:relative;left:auto;right:auto;bottom:auto;width:calc(100% - 1rem);max-height:none;margin:.5rem auto;overflow:visible}.tutorial-coach h2{font-size:1.15rem}.tutorial-nav{justify-content:center}.tutorial-focus{outline-offset:2px}.tutorial-shell .table{margin-top:0}}
+@media(prefers-reduced-motion:reduce){.tutorial-focus{animation:none}.tutorial-progress i{transition:none}}

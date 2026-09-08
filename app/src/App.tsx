@@ -8,6 +8,8 @@ import {
 } from "react";
 import { RoomClient } from "./client";
 import { Domino } from "./domino";
+import { HiddenHand, PlayerCard } from "./table-components";
+import { Tutorial } from "./Tutorial";
 import {
   scheduleTrickTimeline,
   TRICK_COLLECT_ANIMATION_MS,
@@ -61,7 +63,7 @@ async function safeJson<T>(response: Response): Promise<T | null> {
 export default function App() {
   const invite = useMemo(codeFromUrl, []);
   const inviteOnlyEntry = Boolean(invite);
-  const [screen, setScreen] = useState<"home" | "room" | "game">(
+  const [screen, setScreen] = useState<"home" | "room" | "game" | "tutorial">(
     invite ? "room" : "home",
   );
   const [name, setName] = useState(localStorage.getItem("moon.name") || "");
@@ -224,6 +226,14 @@ export default function App() {
         }}
       />
     );
+  if (screen === "tutorial") {
+    return (
+      <Tutorial
+        playPlayerTone={playPlayerTone}
+        onExit={() => setScreen("home")}
+      />
+    );
+  }
   return (
     <main className="entry-shell">
       <section className="entry-card">
@@ -240,22 +250,28 @@ export default function App() {
           </p>
         )}
         {!inviteOnlyEntry && (
-          <div className="game-picks">
-            <button
-              className={gameType === "moon" ? "selected" : ""}
-              onClick={() => setGameType("moon")}
-            >
-              <strong>Moon</strong>
-              <span>3 players · individual scoring · widow</span>
+          <>
+            <button className="learn-button" onClick={() => setScreen("tutorial")}>
+              <strong>Learn to play</strong>
+              <span>Interactive Moon and Texas 42 lessons · no name required</span>
             </button>
-            <button
-              className={gameType === "texas42" ? "selected" : ""}
-              onClick={() => setGameType("texas42")}
-            >
-              <strong>Texas 42</strong>
-              <span>4 players · partners · count dominoes</span>
-            </button>
-          </div>
+            <div className="game-picks">
+              <button
+                className={gameType === "moon" ? "selected" : ""}
+                onClick={() => setGameType("moon")}
+              >
+                <strong>Moon</strong>
+                <span>3 players · individual scoring · widow</span>
+              </button>
+              <button
+                className={gameType === "texas42" ? "selected" : ""}
+                onClick={() => setGameType("texas42")}
+              >
+                <strong>Texas 42</strong>
+                <span>4 players · partners · count dominoes</span>
+              </button>
+            </div>
+          </>
         )}
         <label>
           {inviteOnlyEntry ? "Name" : "Your name"}
@@ -566,6 +582,13 @@ function Game({
     [debugEnabled],
   );
   const bySeat = (s: number) => view.players.find((p) => p.seat === s);
+  const teamLabel = (team: number) => {
+    const names = view.players
+      .filter((player) => player.team === team)
+      .sort((a, b) => a.seat - b.seat)
+      .map((player) => player.name);
+    return names.length ? `Team (${names.join(" & ")})` : `Team ${team + 1}`;
+  };
   const relative = (offset: number) =>
     bySeat(((me?.seat || 0) + offset) % count);
   const trickOriginClass = (seat: number) => {
@@ -1013,15 +1036,15 @@ function Game({
         {view.gameType === "texas42" && (
           <>
             <span>
-              Marks{" "}
+              Game score{" "}
               <b>
-                {g.teamMarks[0]}–{g.teamMarks[1]}
+                {teamLabel(0)} {g.teamMarks[0]} · {teamLabel(1)} {g.teamMarks[1]}
               </b>
             </span>
             <span>
               Hand points{" "}
               <b>
-                {g.teamHandPoints[0]}–{g.teamHandPoints[1]}
+                {teamLabel(0)} {g.teamHandPoints[0]} · {teamLabel(1)} {g.teamHandPoints[1]}
               </b>
             </span>
           </>
@@ -1145,13 +1168,13 @@ function Game({
             <p>{presentedMessage}</p>
             {view.gameType === "texas42" ? (
               <div className="result-grid">
-                <span>Hand points</span>
+                <span>{teamLabel(0)}</span>
                 <b>
-                  Team 1 {g.teamHandPoints[0]} - Team 2 {g.teamHandPoints[1]}
+                  {g.teamHandPoints[0]} hand points · {g.teamMarks[0]} marks
                 </b>
-                <span>Total marks</span>
+                <span>{teamLabel(1)}</span>
                 <b>
-                  Team 1 {g.teamMarks[0]} - Team 2 {g.teamMarks[1]}
+                  {g.teamHandPoints[1]} hand points · {g.teamMarks[1]} marks
                 </b>
               </div>
             ) : (
@@ -1181,7 +1204,7 @@ function Game({
         <div>
           <strong>
             Your hand{" "}
-            {view.gameType === "texas42" ? `· Team ${(me?.team ?? 0) + 1}` : ""}
+            {view.gameType === "texas42" ? `· ${teamLabel(me?.team ?? 0)}` : ""}
           </strong>
           <span>
             {waitingForTrick
@@ -1227,7 +1250,7 @@ function Game({
             <p>{presentedMessage}</p>
             {view.gameType === "texas42" ? (
               <p className="game-over-detail">
-                Final marks: Team 1 {g.teamMarks[0]} - Team 2 {g.teamMarks[1]}
+                Final marks: {teamLabel(0)} {g.teamMarks[0]} · {teamLabel(1)} {g.teamMarks[1]}
               </p>
             ) : (
               <div className="game-over-scores">
@@ -1281,49 +1304,6 @@ function Game({
     </main>
   );
 }
-function PlayerCard({
-  p,
-  pos,
-  active,
-}: {
-  p: RoomView["players"][number] | undefined;
-  pos: string;
-  active: boolean;
-}) {
-  return (
-    <div className={`player player-color-${p?.seat ?? 0} ${pos} ${active ? "active" : ""}`}>
-      <span className="avatar">
-        {p?.isAI ? "AI" : p?.name.slice(0, 2).toUpperCase()}
-      </span>
-      <div>
-        <strong>{p?.name}</strong>
-        <small>
-          {p?.score} pts · {p?.tricks} tricks
-        </small>
-        {active && <small className="turn-indicator">Taking turn</small>}
-      </div>
-    </div>
-  );
-}
-function HiddenHand({
-  count,
-  pos,
-  seat,
-  active = false,
-}: {
-  count: number;
-  pos: string;
-  seat?: number;
-  active?: boolean;
-}) {
-  return (
-    <div className={`hidden-hand player-color-${seat ?? 0} ${pos} ${active ? "active" : ""}`}>
-      {Array.from({ length: count }, (_, i) => (
-        <Domino hidden key={i} />
-      ))}
-    </div>
-  );
-}
 function Decision({
   g,
   rules,
@@ -1366,6 +1346,7 @@ function Decision({
             {(g.highBid || 0) < 84 && (
               <button
                 className="primary"
+                title="Bid 84 and take all 42 points. Two marks go to the team that wins the contract."
                 onClick={() => send("BID", { bid: 84 })}
               >
                 2 marks
@@ -1374,6 +1355,7 @@ function Decision({
             {(g.highBid || 0) >= 84 && (
               <button
                 className="primary"
+                title="Bid every point for the displayed number of marks. If your team misses even one point, the opponents earn those marks."
                 onClick={() =>
                   send("BID", {
                     bid: Math.ceil(((g.highBid || 84) + 1) / 42) * 42,
@@ -1385,6 +1367,10 @@ function Decision({
             )}
             <button onClick={() => send("PASS")}>Pass</button>
           </div>
+          <small className="specialty-help">
+            Bids 30–42 risk one mark. A 2-mark bid means taking all 42 points;
+            if your team misses even one point, the opponents receive both marks.
+          </small>
         </section>
       );
     }
@@ -1429,6 +1415,7 @@ function Decision({
           ))}
           {(gameType === "texas42" || rules.allowDoublesTrump) && (
             <button
+              title="All doubles form their own trump suit."
               onClick={() =>
                 send("CHOOSE_TRUMP", { trump: "doubles" satisfies Trump })
               }
@@ -1438,6 +1425,7 @@ function Decision({
           )}
           {(gameType === "texas42" || rules.allowFollowMe) && (
             <button
+              title="No trump suit. The high end of the lead establishes the suit."
               onClick={() =>
                 send("CHOOSE_TRUMP", { trump: "follow-me" satisfies Trump })
               }
@@ -1446,6 +1434,10 @@ function Decision({
             </button>
           )}
         </div>
+        <small className="specialty-help">
+          Doubles makes every double trump. Follow me uses no trump; follow the
+          high end of the domino led.
+        </small>
       </section>
     );
   if (g.phase === "widow")
